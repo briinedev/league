@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "strict": true,
+
+    "rootDir": "bots",
+
+    "types": ["node"]
+  },
+  "include": ["bots/**/*.ts"],
+  "exclude": ["test", "node_modules"]
+}
