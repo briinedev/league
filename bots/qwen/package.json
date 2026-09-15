@@ -1,0 +1,8 @@
+{
+  "name": "@briine/qwen-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.ts"
+  }
+}

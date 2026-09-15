@@ -7,9 +7,18 @@
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "deepseek": "node --env-file=.env bots/deepseek/index.ts",
+    "gpt-oss": "node --env-file=.env bots/gpt-oss/index.ts",
+    "kimi": "node --env-file=.env bots/kimi/index.ts",
+    "qwen": "node --env-file=.env bots/qwen/index.ts"
   },
   "dependencies": {
     "@briine/sdk": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
   }
 }

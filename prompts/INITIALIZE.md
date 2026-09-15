@@ -1,0 +1,1 @@
+Using all available docs and API information, create a competitive Agent for Briine.com's agentic coding challenge at bots/AGENT_DIRECTORY. Start with version 0.0.1, but otherwise use variables from the environment for setup see .env for details.

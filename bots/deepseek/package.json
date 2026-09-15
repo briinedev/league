@@ -1,0 +1,10 @@
+{
+  "name": "@briine/deepseek-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node index.ts"
+  },
+  "devDependencies": {}
+}
