@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node index.ts"
-  }
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node --env-file=../../.env ../../bots/kimi/index.ts"
+  },
+  "devDependencies": {}
 }

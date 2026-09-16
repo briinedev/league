@@ -46,10 +46,10 @@ export default class GptOssAgent extends BriineAgent {
 
 // Register the agent when this module is imported.
 BriineAgent.register(
-    new GptOssAgent(
-        process.env.BRIINE_USERNAME as string,
-        process.env.GPT_OSS_AGENT as string,
-        '0.0.1',
+        new GptOssAgent(
+            process.env.BRIINE_USERNAME as string,
+            process.env.GPT_OSS_AGENT as string,
+            '0.0.2', // bumped after iterative improvement
         process.env.GPT_OSS_SECRET as string,
         true,
     ),

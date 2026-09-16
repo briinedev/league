@@ -10,19 +10,18 @@ import KimiAgent from './agent.ts';
  *   KIMI_HOST       (or BRIINE_HOST)
  *   KIMI_AGENT      agent/bot name
  *   KIMI_SECRET     agent secret
- *   KIMI_VERSION    agent version, e.g. "0.0.1"
+ *   KIMI_VERSION    agent version, e.g. "0.0.2"
  *   KIMI_STAY_QUEUED  set "true" to auto-requeue after matches
  */
-
-const VERSION = '0.0.1';
 
 const env = process.env;
 
 const username = env.BRIINE_USERNAME || '';
-const host = env.KIMI_HOST || env.BRIINE_HOST || '';
+const host = env.BRIINE_HOST || '';
 const agentName = env.KIMI_AGENT || '';
 const secret = env.KIMI_SECRET || '';
-const stayQueued = env.KIMI_STAY_QUEUED?.toLowerCase() === 'true';
+const version = env.KIMI_VERSION || '0.0.2';
+const stayQueued = env.BRIINE_STAY_QUEUED?.toLowerCase() === 'true';
 
 if (!username || !agentName || !secret) {
   console.error(
@@ -34,7 +33,7 @@ if (!username || !agentName || !secret) {
 const agent = new KimiAgent(
   username,
   agentName,
-  VERSION,
+  version,
   secret,
   stayQueued,
 );

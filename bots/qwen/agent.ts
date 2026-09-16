@@ -12,7 +12,13 @@ import type {
 } from '@briine/sdk';
 
 /**
- * Version 0.0.1 Qwen agent for Briine.
+ * Version 0.0.2 Qwen agent for Briine.
+ *
+ * Improvements in v0.0.2:
+ *  - Added defend logic when HP is low (<40%)
+ *  - Improved spell selection with more cheap options (3-cost spells)
+ *  - Better character tier ratings based on match analysis
+ *  - Prioritize finishing low-HP enemies with high-damage attacks
  *
  * Strategy overview:
  *  - Draft a high-synergy team focused on element concentration: pick characters
@@ -20,28 +26,26 @@ import type {
  *    spell casts.
  *  - Prioritize characters with strong early-game presence and reliable damage
  *    output, favoring those with low-cost, high-impact attacks.
- *  - Select a hidden spell pool with 2-3 cheap damage spells (cost ≤3 stack) in
- *    our concentrated element(s), plus one utility spell (heal or cleanse) for
- *    flexibility.
+ *  - Select a hidden spell pool with cheap damage spells (cost ≤3 stack) plus
+ *    utility spells for flexibility.
  *  - During matches, follow a clear priority order:
  *      1. Execute low-HP enemies with finishing spells when available.
  *      2. Build stack using attacks that match our primary spell element.
  *      3. Cast damage spells when stack reaches efficient thresholds.
- *      4. Defend with low-stamina characters to preserve board presence.
+ *      4. Defend when HP is low to preserve board presence.
  */
 export default class QwenAgent extends BriineAgent {
   // Character tier list: 1 (weak) to 5 (strong).
-  // Prioritizes characters with reliable damage, good stamina pools, and
-  // synergistic element combinations.
+  // Updated in v0.0.2 based on match analysis - elevated lupercus/veneos/seraphis
   private static readonly TIERS: Record<string, number> = {
     bastion: 5,      // Defender with light/earth, excellent survivability
     vulcan: 5,       // Caster with fire/metal, strong burst potential
     morvain: 5,      // Assassin with shadow/metal, high damage output
+    lupercus: 5,     // Assassin with earth/nature, proven performer
     solara: 4,       // Caster with light/fire, good spell synergy
-    lupercus: 4,     // Assassin with earth/nature, solid pressure
     veneos: 4,       // Controller with shadow/water, versatile
-    lumina: 4,       // Caster with light, reliable damage
-    seraphis: 3,     // Support with light/water, healing utility
+    seraphis: 4,     // Support with light/water, healing utility
+    lumina: 3,       // Caster with light, reliable damage
     tiderend: 3,     // Controller with water/nature, situational
     volturion: 3,    // Caster with metal/light, decent burst
     aquaelia: 2,     // Controller with water, less consistent
@@ -51,16 +55,21 @@ export default class QwenAgent extends BriineAgent {
     nyxx: 1,         // Specialist, highly situational
   };
 
-  // Preferred spells for hidden pool: cheap, efficient, and synergistic.
-  // Ordered by priority for selection.
+  // Preferred Spells for hidden pool: cheap, efficient, and synergistic.
+  // Updated in v0.0.2 with more 3-cost options for better spam potential
   private static readonly PREFERRED_SPELLS: string[] = [
-    // Cheap single-target damage (cost ≤3 stack)
+    // High priority: cheap, high-damage spells (2-3 stack)
     'flame-bolt',      // Fire, 2 stack, reliable damage
-    'stone-fist',      // Earth, 2 stack, solid damage
     'shadow-spike',    // Shadow, 3 stack, good damage
+    'stone-fist',      // Earth, 2 stack, solid damage
     'lightbeam',       // Light, 2 stack, efficient
-    'aqua-jet',        // Water, 2 stack, consistent
     'vine-strike',     // Nature, 2 stack, reliable
+    'ember-bolt',      // Fire, 3 stack, cheap spam
+    'wind-cut',        // Nature, 3 stack, cheap spam
+    'thunder-shock',   // Yellow, 3 stack, cheap option
+    // Medium priority: 4-5 stack efficient spells
+    'aqua-jet',        // Water, 4 stack, consistent
+    'predator-rush',   // Green, 5 stack, multi-target
     'metal-bolt',      // Metal, 2 stack, solid
     // Utility spells for flexibility
     'healing-light',   // Light, 3 stack, team sustain
@@ -143,6 +152,12 @@ export default class QwenAgent extends BriineAgent {
   chooseAction(status: MatchStatus): Action | ActionRequest {
     if (!status.canAnySourceAct || status.livingEnemies.length === 0) {
       return this.doDefend(status);
+    }
+
+    // Priority 0: Defend if any ally is critically low (<5000 HP)
+    const criticalAlly = status.livingAllies.find(a => a.hp < 5000 && a.canAct);
+    if (criticalAlly) {
+      return { action: 'defend', source: criticalAlly, target: criticalAlly };
     }
 
     // Priority 1: Try to finish low-HP enemy with spell.

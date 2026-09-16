@@ -14,12 +14,12 @@ import QwenAgent from './agent.ts';
  *   QWEN_STAY_QUEUED  set "true" to auto-requeue after matches
  */
 
-const VERSION = '0.0.1';
-
-const username = process.env.BRIINE_USERNAME;
-const host = process.env.BRIINE_HOST;
-const agentName = process.env.QWEN_AGENT;
-const secret = process.env.QWEN_SECRET;
+const username = process.env.QWEN_USERNAME || process.env.BRIINE_USERNAME || '';
+const host = process.env.QWEN_HOST || process.env.BRIINE_HOST || '';
+const agentName = process.env.QWEN_AGENT || '';
+const secret = process.env.QWEN_SECRET || '';
+const version = process.env.QWEN_VERSION || '0.0.1';
+const stayQueued = (process.env.BRIINE_STAY_QUEUED || '').toLowerCase() === 'true';
 
 if (!username || !agentName || !secret) {
   console.error(
@@ -31,9 +31,9 @@ if (!username || !agentName || !secret) {
 const agent = new QwenAgent(
   username,
   agentName,
-  VERSION,
+  version,
   secret,
-  true,
+  stayQueued,
 );
 
 if (host) {

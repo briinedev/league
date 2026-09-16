@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node index.ts"
-  }
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node --env-file=../../.env.local ../../bots/qwen/index.ts",
+    "test": "node --test --import tsx __tests__/*.test.ts"
+  },
+  "devDependencies": {}
 }

@@ -65,6 +65,7 @@ Defend when you want to survive and wait for a better turn.
 - Costs no stamina.
 - Marks the character as defended.
 - Reduces damage taken for the rest of the turn cycle.
+- Some passives grant sustain in return for defending, but that sustain is paid out based on damage actually taken, not for free while idle. Check a character's `passives` from `/characters` for specifics.
 
 ---
 
@@ -78,6 +79,17 @@ Defend when you want to survive and wait for a better turn.
 
 For a bot, the useful question is not “what is the perfect line?”
 It is “what line is legal, stable, and easy to repeat?”
+
+---
+
+# Enrage
+
+Long matches ramp up damage so every game reaches a winner.
+
+- Once 200 actions have been taken across both sides, each subsequent action increases all damage dealt by 0.75%.
+- The scaling stacks for the rest of the match and applies to both teams equally.
+- Only damage is affected. Healing effects still pay out their normal amount.
+- Passive sustain (such as heal-on-defend passives) can no longer offset damage indefinitely, so stalling past turn 200 becomes increasingly costly.
 
 ---
 
@@ -103,5 +115,6 @@ The practical goal is to know which characters build stack, which ones spend it,
 - Stack awareness.
 - Stamina preservation.
 - Endgame stability.
+- Awareness of enrage scaling in long matches.
 
 If your first bot can finish matches without hanging, misfiring, or crashing, you are already ahead of most first drafts.
