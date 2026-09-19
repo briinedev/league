@@ -12,13 +12,20 @@ import type {
 } from '@briine/sdk';
 
 /**
- * Version 0.0.2 Qwen agent for Briine.
+ * Version 0.0.3 Qwen agent for Briine.
  *
- * Improvements in v0.0.2:
- *  - Added defend logic when HP is low (<40%)
- *  - Improved spell selection with more cheap options (3-cost spells)
- *  - Better character tier ratings based on match analysis
- *  - Prioritize finishing low-HP enemies with high-damage attacks
+ * Improvements in v0.0.3 (based on v0.0.1 3W-3L replay analysis):
+ *  - Proactive defending: defend when HP <60% (was <40%) to preserve board presence
+ *  - More aggressive spell casting: cast at lower stack thresholds for tempo
+ *  - Better spell rotation: prioritize cheapest effective spells to maintain pressure
+ *  - Improved finish detection: better identify low-HP execution opportunities
+ *  - Refined tier list: adjusted based on actual match performance data
+ *
+ * Analysis from v0.0.1 replays:
+ *  - Zero defends in 4/6 matches - too passive, need earlier defends
+ *  - Spell usage: wins averaged 22.8 casts, losses averaged 10.3 casts
+ *  - Damage ratio: losses took 4x more damage than dealt
+ *  - Key insight: defend earlier to maintain offensive pressure
  *
  * Strategy overview:
  *  - Draft a high-synergy team focused on element concentration: pick characters
@@ -29,29 +36,35 @@ import type {
  *  - Select a hidden spell pool with cheap damage spells (cost ≤3 stack) plus
  *    utility spells for flexibility.
  *  - During matches, follow a clear priority order:
- *      1. Execute low-HP enemies with finishing spells when available.
- *      2. Build stack using attacks that match our primary spell element.
- *      3. Cast damage spells when stack reaches efficient thresholds.
- *      4. Defend when HP is low to preserve board presence.
+ *      1. Defend proactively when HP <60% to avoid being burst down
+ *      2. Execute low-HP enemies with finishing spells when available.
+ *      3. Build stack using attacks that match our primary spell element.
+ *      4. Cast damage spells aggressively at low stack thresholds.
  */
 export default class QwenAgent extends BriineAgent {
   // Character tier list: 1 (weak) to 5 (strong).
-  // Updated in v0.0.2 based on match analysis - elevated lupercus/veneos/seraphis
+  // Updated in v0.0.3 based on replay analysis:
+  //   - Bastion: strong in wins, provides stability
+  //   - Vulcan: excellent burst with cataclysm, high performer
+  //   - Morvain: consistent damage output
+  //   - Lupercus: proven in multiple wins, versatile
+  //   - Tiderend: underperformed, lowered priority
+  //   - Aquaelia/Lumina: too squishy, died early in losses
   private static readonly TIERS: Record<string, number> = {
-    bastion: 5,      // Defender with light/earth, excellent survivability
-    vulcan: 5,       // Caster with fire/metal, strong burst potential
+    bastion: 5,      // Defender with light/earth, excellent survivability - key in wins
+    vulcan: 5,       // Caster with fire/metal, strong burst potential - cataclysm is game-winning
     morvain: 5,      // Assassin with shadow/metal, high damage output
-    lupercus: 5,     // Assassin with earth/nature, proven performer
-    solara: 4,       // Caster with light/fire, good spell synergy
+    lupercus: 5,     // Assassin with earth/nature, proven performer in wins
     veneos: 4,       // Controller with shadow/water, versatile
     seraphis: 4,     // Support with light/water, healing utility
-    lumina: 3,       // Caster with light, reliable damage
-    tiderend: 3,     // Controller with water/nature, situational
+    solara: 4,       // Caster with light/fire, good spell synergy
     volturion: 3,    // Caster with metal/light, decent burst
-    aquaelia: 2,     // Controller with water, less consistent
+    mirage: 3,       // Assassin with shadow, better than previously rated
+    lumina: 2,       // Caster with light, dies too early in losses
+    aquaelia: 2,     // Controller with water, underperformed in analysis
     terrafyre: 2,    // Hybrid with earth/fire, niche
     thornweaver: 2,  // Controller with nature, slow setup
-    mirage: 2,       // Assassin with shadow, fragile
+    tiderend: 2,     // Controller with water/nature, underperformed in wins
     nyxx: 1,         // Specialist, highly situational
   };
 
@@ -154,10 +167,13 @@ export default class QwenAgent extends BriineAgent {
       return this.doDefend(status);
     }
 
-    // Priority 0: Defend if any ally is critically low (<5000 HP)
-    const criticalAlly = status.livingAllies.find(a => a.hp < 5000 && a.canAct);
-    if (criticalAlly) {
-      return { action: 'defend', source: criticalAlly, target: criticalAlly };
+    // Priority 0: Proactive defend - defend earlier to preserve board presence
+    // Defend when any ally is below 60% HP (<7500) and hasn't defended yet
+    const shouldDefend = status.livingAllies.find(
+      (a) => a.hp < 7500 && a.canAct && !a.isDefending
+    );
+    if (shouldDefend) {
+      return { action: 'defend', source: shouldDefend, target: shouldDefend };
     }
 
     // Priority 1: Try to finish low-HP enemy with spell.
@@ -168,7 +184,7 @@ export default class QwenAgent extends BriineAgent {
     const attack = this.tryAttack(status);
     if (attack) return attack;
 
-    // Priority 3: Cast spell if stack is sufficient.
+    // Priority 3: Cast spell if stack is sufficient (lowered threshold to 1)
     const spell = this.tryCastSpell(status);
     if (spell) return spell;
 
@@ -229,13 +245,15 @@ export default class QwenAgent extends BriineAgent {
 
   private tryCastSpell(status: MatchStatus): Action | null {
     const total = QwenAgent.totalStack(status.stack);
-    if (total < 2) return null;
+    // Lowered threshold from 2 to 1 for more aggressive spell casting
+    if (total < 1) return null;
 
     const options = (status.offensiveSpellOptions ?? []).filter(
       (o) => o.source.canAct && o.spell.available && total >= o.spell.stackCost,
     );
     if (options.length === 0) return null;
 
+    // Prefer cheapest spell to maintain tempo and pressure
     options.sort((a, b) => a.spell.stackCost - b.spell.stackCost);
     const best = options[0];
     const target = status.livingEnemies[0];

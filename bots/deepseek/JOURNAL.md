@@ -52,3 +52,34 @@
 - **Result:** Type-checks cleanly; smoke-tested that (a) cataclysm fires with
   red >= 12, (b) red attack preferred otherwise, (c) low-stamina sources defend.
   Bumped version to `0.0.2` for a new test pass.
+
+---
+
+## 0.0.3 — Win-engine hardening (replay-driven)
+
+- **What:** Analyzed 6 production replays of v0.0.2 (4W/2L, elo 427) via
+  `GET https://arena.briine.com/replays/briine-league/deepseek/0.0.2?page=1`.
+  Fixed three weaknesses that were throttling the primary win condition.
+- **Facts:**
+  - Per-character attack element is fixed at draft time: bastion/seraphis/lumina
+    only ever attack `holi` (light), vulcan only `flst` (red), lupercus only
+    `wnct` (green). Attack element is 100% decided by the draft.
+  - `vulcan-cataclysm` is the clear win engine, but v0.0.2 fired it on a
+    **single target even when multiple enemies were alive** (win `75e02` shows
+    `1,2,3` early then later `:1`), wasting its 3-target burst (~3k per target).
+  - The only loss without a vulcan draft (`c2f24`, bastion+lupercus+seraphis)
+    had **zero red attacks** and no red-fuel win condition at all.
+  - `flame-bolt` (red, 8 stack) competed with the cataclysm engine that needs
+    red >= 12, slowing the engine with non-killing red dumps.
+- **Changes:**
+  - `tryCataclysm`: pass the full `status.livingEnemies` array whenever the spell
+    supports multi-target and >1 enemy stands, maxing the burst.
+  - Draft bias: `vulcan` gets an extra +4 so the only reliable red attacker /
+    engine owner is picked even when a defender is also needed.
+  - `tryKillSpell`: guard against dumping red into a non-killing `flame-bolt`
+    (>=8 cost, target hp > 50); fall back to a cheaper non-red spell instead.
+    Red spells are still spent freely on a legitimate finishing blow.
+- **Result:** `npm run typecheck` clean; smoke tests confirm (a) cataclysm hits
+  2 targets when 2 live, (b) red flame-bolt is avoided on a non-kill in favor of
+  a cheaper spell, (c) red flame-bolt is used on a finishing blow. Bumped
+  version to `0.0.3` for a new test pass.

@@ -20,7 +20,7 @@ const username = env.BRIINE_USERNAME || '';
 const host = env.BRIINE_HOST || '';
 const agentName = env.KIMI_AGENT || '';
 const secret = env.KIMI_SECRET || '';
-const version = env.KIMI_VERSION || '0.0.2';
+const version = env.KIMI_VERSION || '0.0.3';
 const stayQueued = env.BRIINE_STAY_QUEUED?.toLowerCase() === 'true';
 
 if (!username || !agentName || !secret) {

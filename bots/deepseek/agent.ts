@@ -10,15 +10,24 @@ import type {
 } from '@briine/sdk';
 
 /**
- * Version 0.0.2 DeepSeek agent for Briine.
+ * Version 0.0.3 DeepSeek agent for Briine.
  *
- * Strategy overview (v0.0.2): after reviewing replays (3W/2L, elo 432), the
- * bot over-spammed light (holi) attacks without aligning to a win engine and
- * never defended. This version:
- *  - Focuses the spell pool on red/blue cheap damage to fuel vulcan-cataclysm.
- *  - Prefers red > blue > light attacks that build the win engine.
- *  - Uses a dedicated "cataclysm" trigger when red stack >= 12.
- *  - Defends low-stamina sources to preserve turns.
+ * Strategy overview (v0.0.3): after reviewing v0.0.2 replays (4W/2L, elo 427),
+ * the bot's win engine (vulcan-cataclysm) was being underutilised and
+ * sabotaged:
+ *  - Cataclysm fired on a single target even when multiple enemies were alive,
+ *    wasting its 3-target burst.
+ *  - flame-bolt (red, 8 cost) competed with cataclysm for the red stack we
+ *    need (>= 12) to fire the engine.
+ *  - In the no-vulcan draft the bot had no red attacker at all -> lost.
+ *
+ * This version:
+ *  - Fires cataclysm at all living enemies when it can (maxTargets > 1).
+ *  - Biases the draft hard toward vulcan, the only reliable red attacker and
+ *    the owner of the win-engine spell.
+ *  - Refuses to dump red into a non-killing flame-bolt while red >= 12 is
+ *    being saved for cataclysm.
+ *  - Keeps prioritising red > blue > light attacks and defends weak sources.
  */
 export default class DeepSeekAgent extends BriineAgent {
   // Draft rough value 1 (weak) to 5 (strong) for each playable id.
@@ -86,6 +95,10 @@ export default class DeepSeekAgent extends BriineAgent {
       let score = DeepSeekAgent.TIERS[c.id] ?? 1;
       if (needsDefender && DeepSeekAgent.isDefender(c.id)) score += 2;
       if (needsAssassin && DeepSeekAgent.isAssassin(c.id)) score += 2;
+      // vulcan is the only reliable red attacker and our primary win engine
+      // (vulcan-cataclysm). Bias heavily toward picking him whenever he is
+      // still available, otherwise we have no red-fuel win condition.
+      if (c.id === 'vulcan') score += 4;
       if (score > bestScore) {
         bestScore = score;
         best = c;
@@ -157,12 +170,14 @@ export default class DeepSeekAgent extends BriineAgent {
     if (red < 12) return null;
 
     const best = options[0];
-    // Prioritise a lone/low target to concentrate the burst.
+    // vulcan-cataclysm hits up to 3 enemies. Fire it at *all* living enemies
+    // whenever possible to maximise the burst (replays showed it firing on a
+    // single target and wasting the multi-target payoff).
     const target =
-      status.livingEnemies.length === 1
-        ? status.livingEnemies[0]
-        : status.lowestHpEnemy ?? status.livingEnemies[0];
-    return { action: best.spell, source: best.source, target: target as Character };
+      best.spell.maxTargets > 1 && status.livingEnemies.length > 1
+        ? status.livingEnemies
+        : (status.lowestHpEnemy ?? status.livingEnemies[0]);
+    return { action: best.spell, source: best.source, target };
   }
 
   private tryKillSpell(status: MatchStatus): Action | null {
@@ -174,15 +189,44 @@ export default class DeepSeekAgent extends BriineAgent {
     );
     if (options.length === 0) return null;
 
+    const isRedSpell = (o: { spell: AllySpell }) =>
+      DeepSeekAgent.elementId(o.spell.element) === 'red';
+
     // Spend a spell only when it can plausibly finish the target or is cheap.
     const finishable = target.hp <= 50;
-    const cheap = options.some((o) => o.spell.stackCost <= this.stackFor(spellElement(o.spell), status) + 2);
+    const cheap = options.some(
+      (o) => o.spell.stackCost <= this.stackFor(spellElement(o.spell), status) + 2,
+    );
     if (!finishable && !cheap) return null;
 
-    options.sort(
-      (a, b) => a.spell.stackCost - b.spell.stackCost || a.spell.maxTargets - b.spell.maxTargets,
-    );
-    const best = options[0];
+    // Prefer the cheap 5-cost spells (most efficient stack conversion), then
+    // multi-target spells for more total burst.
+    const best = [...options].sort(
+      (a, b) => a.spell.stackCost - b.spell.stackCost || b.spell.maxTargets - a.spell.maxTargets,
+    )[0];
+
+    // Guard the red win engine: never dump red into flame-bolt (8 cost) unless
+    // it is a clean finishing blow. Red is the scarce resource feeding
+    // vulcan-cataclysm (>= 12 stack); burning it on a non-kill delays the engine.
+    if (
+      isRedSpell(best) &&
+      !finishable &&
+      best.spell.stackCost >= 8
+    ) {
+      // Fall back to the cheapest non-red spell if one exists.
+      const nonRed = options
+        .filter((o) => !isRedSpell(o))
+        .sort((a, b) => a.spell.stackCost - b.spell.stackCost)[0];
+      return nonRed
+        ? {
+            action: nonRed.spell,
+            source: nonRed.source,
+            target:
+              nonRed.spell.maxTargets > 1 ? status.livingEnemies : target,
+          }
+        : null;
+    }
+
     return {
       action: best.spell,
       source: best.source,

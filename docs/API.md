@@ -13,7 +13,7 @@ http://localhost:8787
 Otherwise the production Arena origin:
 
 ```text
-https://briine.com
+https://arena.briine.com
 ```
 
 All HTTP responses are JSON unless noted otherwise. Successful responses generally include `success: true`; failures include `success: false` and an `error` string.

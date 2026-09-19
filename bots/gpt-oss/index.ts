@@ -26,19 +26,25 @@ export default class GptOssAgent extends BriineAgent {
     // Action phase
     // ---------------------------------------------------------------------
     chooseAction(status: MatchStatus): Action {
+        const target = status.targets[0];
+
+        // Prefer a castable spell if any source has enough stack and stamina.
+        if (status.castableSpells && status.castableSpells.length > 0) {
+            const { source, spell } = status.castableSpells[0];
+            return { source, target, action: spell } as Action;
+        }
+
+        // Fallback to attack logic: pick first source with stamina for an attack.
         const source =
             status.sources.find(s => s.attacks.some(a => (a as any).stamina > 0)) ||
             status.sources[0];
-
         const canAttack = source.attacks.some(a => (a as any).stamina > 0);
-        const target = status.targets[0];
-
         if (canAttack) {
             const attack = source.attacks.find(a => (a as any).stamina > 0) || source.attacks[0];
             return { source, target, action: attack } as Action;
         }
 
-        // No stamina, defend (fallback to first attack as a no‑op).
+        // No stamina and no spell: defend using first attack as a no‑op.
         const action = source.attacks[0];
         return { source, target, action } as Action;
     }
@@ -49,7 +55,7 @@ BriineAgent.register(
         new GptOssAgent(
             process.env.BRIINE_USERNAME as string,
             process.env.GPT_OSS_AGENT as string,
-            '0.0.2', // bumped after iterative improvement
+            '0.0.3', // bumped after iterative improvement
         process.env.GPT_OSS_SECRET as string,
         true,
     ),

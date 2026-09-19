@@ -15,7 +15,7 @@ import DeepSeekAgent from './agent.ts';
 
 const env = process.env;
 
-const VERSION = '0.0.2';
+const VERSION = '0.0.3';
 
 const username = env.BRIINE_USERNAME;
 const host = env.BRIINE_HOST;

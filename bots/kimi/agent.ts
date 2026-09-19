@@ -12,39 +12,33 @@ import type {
 } from '@briine/sdk';
 
 /**
- * Version 0.0.2 Kimi agent for Briine.
+ * Version 0.0.3 Kimi agent for Briine.
  *
- * Strategy overview:
- *  - Draft a balanced, high-value team: one durable defender, one hard-hitting
- *    assassin/caster, and a flexible third pick that can build or spend stack
- *    efficiently. Prefer characters whose attacks produce the elements our
- *    chosen spells need.
- *  - Pick a hidden spell pool biased toward high-burst, multi-target spells and
- *    one efficient team heal. Avoid cheap spells that do not kill.
- *  - During a match, act with a stable priority order:
- *      1. Knock out a low-HP enemy with a finishing spell if possible.
- *      2. Heal an ally in danger if a support spell is available and useful.
- *      3. Cast a big offensive spell when it will swing the board.
- *      4. Focus-fire the most vulnerable enemy with the strongest available
- *         attack matching an element we still need.
- *      5. Defend when no strong action is available or our frontliner is being
- *         focused and we want to reduce incoming damage.
+ * Changes from 0.0.2:
+ *  - Spell pool is chosen to match the team's attack elements so generated
+ *    stack can actually be spent. Expensive off-element spells are deprioritized.
+ *  - Defending is a real priority branch: used to preserve stamina, protect
+ *    low-HP/undefended allies, and avoid wasting actions on weak attacks.
+ *  - Offensive spells are chosen with affordability and stack surplus in mind;
+ *    we prefer multi-target spells and cheap damage conversion when high-cost
+ *    finishers would leave stack unused.
+ *  - Attacks avoid weak "holi" swipes when a stronger attack or a defend is
+ *    clearly better.
  */
 export default class KimiAgent extends BriineAgent {
   // Draft value: 1 (weak) to 5 (strong). Based on survivability, damage
-  // potential, and stack synergy. Bumps given to characters whose attacks or
-  // unique spells showed up as high-impact in local replays.
+  // potential, and stack synergy.
   private static readonly TIERS: Record<string, number> = {
-    bastion: 5, // durable defender, can defend teammates
-    vulcan: 5, // red burst spell + strong flst attack
-    lupercus: 5, // wnct green builder + sustain
+    bastion: 5, // durable defender, light/orange attacks feed our spells
+    vulcan: 5, // red burst spell + strong red attack
+    lupercus: 5, // green builder + sustain
     morvain: 5, // black/red coverage, blood-oath utility
     terrafyre: 4, // orange/red bruiser
     solara: 4, // yellow burst potential
-    veneos: 4, // purple assassin, strong tolu
+    veneos: 4, // purple assassin
     lumina: 4, // light/blue support
     tiderend: 4, // blue sustain
-    aquaelia: 3, // blue/light converter; holi is weak
+    aquaelia: 3, // blue/light converter
     seraphis: 3, // defensive support
     volturion: 3, // yellow/black niche
     nyxx: 2, // expensive unique, weak attacks
@@ -52,27 +46,31 @@ export default class KimiAgent extends BriineAgent {
     thornweaver: 2, // green/purple but slow
   };
 
-  // Preferred shared spells: high-burst damage and one efficient heal.
-  // We avoid cheap filler spells that do not secure kills.
-  private static readonly PREFERRED_SPELLS: string[] = [
-    'vulcan-cataclysm', // red, cost 0 unique only on vulcan, but keep as signal
-    'amethyst-burst', // purple single-target nuke
-    'flame-bolt', // red single-target nuke
-    'tidal-burst', // blue 2-target nuke
-    'sunflare', // yellow 2-target nuke
+  // Candidate spells we are willing to pick. Final selection is filtered by
+  // the team's generated attack elements so the pool is actually castable.
+  private static readonly CANDIDATE_SPELLS: string[] = [
+    'vulcan-cataclysm', // unique red nuke, stackCost 0
+    'flame-bolt', // red single-target, cheap
+    'burn', // red single-target with dot
+    'forge-wave', // orange 3-target
     'light-dawn', // light 2-target nuke
-    'spark-burst', // yellow 3-target nuke
-    'forge-wave', // orange 3-target nuke
     'healing-light', // light team heal
-    'pulse-of-life', // green team heal
-    'violet-veil', // purple 2-target, cheaper
-    'burn', // red single-target
-    'dark-pact', // black single-target
+    'sunflare', // yellow 2-target
+    'spark-burst', // yellow 3-target
+    'amethyst-burst', // purple single-target
+    'violet-veil', // purple 2-target
+    'tidal-burst', // blue 2-target
+    'aqua-jet', // blue single-target, cheap
+    'lightbeam', // yellow single-target, cheap
+    'stone-fist', // orange single-target, very cheap
   ];
 
-  // We update preferredElements after the spell pool is chosen so attacks can
-  // build stack for spells we actually have.
-  private preferredElements: string[] = ['red', 'blue', 'green', 'purple', 'yellow'];
+  // Elements our current draft can generate through attacks. Updated after
+  // character selection so spell/attack choices can build and spend stack.
+  private generatedElements: Set<string> = new Set();
+
+  // Elements we want to generate with attacks based on the chosen spell pool.
+  private preferredElements: string[] = [];
 
   private static isDefender(id: string): boolean {
     return ['bastion', 'lumina', 'seraphis', 'tiderend', 'terrafyre'].includes(id);
@@ -80,10 +78,6 @@ export default class KimiAgent extends BriineAgent {
 
   private static isAssassin(id: string): boolean {
     return ['veneos', 'vulcan'].includes(id);
-  }
-
-  private static isBigSpender(id: string): boolean {
-    return ['vulcan', 'morvain', 'solara', 'aquaelia'].includes(id);
   }
 
   private static elementId(element: Spell['element']): string {
@@ -115,15 +109,10 @@ export default class KimiAgent extends BriineAgent {
     const needsDefender = !ally.some((c) => KimiAgent.isDefender(c.id));
     const needsAssassin = !ally.some((c) => KimiAgent.isAssassin(c.id));
 
-    // Prefer attacks whose elements help pay for our planned spells.
+    // Once we know our first picks, bias toward characters whose attack
+    // elements overlap with the spells we want to cast.
     const desiredElements = new Set(
-      (this.preferredElements?.length ? this.preferredElements : [
-        'red',
-        'purple',
-        'blue',
-        'yellow',
-        'green',
-      ]),
+      this.preferredElements.length ? this.preferredElements : ['orange', 'red', 'light', 'yellow'],
     );
 
     let best = remaining[0];
@@ -137,12 +126,17 @@ export default class KimiAgent extends BriineAgent {
       const usefulAttacks = attacks.filter((a) =>
         desiredElements.has(KimiAgent.attackElement(a)),
       ).length;
-      score += usefulAttacks * 0.4;
+      score += usefulAttacks * 0.6;
 
       if (score > bestScore) {
         bestScore = score;
         best = c;
       }
+    }
+
+    // Track generated elements as picks are locked in.
+    for (const a of best.attacks ?? []) {
+      this.generatedElements.add(KimiAgent.attackElement(a));
     }
     return best;
   }
@@ -152,33 +146,45 @@ export default class KimiAgent extends BriineAgent {
     _ally: Character[],
     _enemy: Character[],
   ): Spell[] {
-    // Score spells by desireability: big burst > team heal > cheaper damage.
-    const scored = available
-      .filter((s) => KimiAgent.PREFERRED_SPELLS.includes(s.id))
-      .map((s) => {
-        let score = 0;
-        if (s.maxTargets >= 2) score += 3; // team nukes swing boards
-        if (s.stackCost >= 10) score += 2; // expensive usually means impactful
-        if (s.id === 'healing-light' || s.id === 'pulse-of-life') score += 4;
-        if (s.id === 'vulcan-cataclysm') score += 5;
-        if (s.id === 'amethyst-burst' || s.id === 'flame-bolt') score += 2;
-        return { spell: s, score };
-      })
-      .sort((a, b) => b.score - a.score);
-
-    const heal = available.find(
-      (s) => s.id === 'healing-light' || s.id === 'pulse-of-life',
+    // Filter to candidates that are available in this draft.
+    const candidates = available.filter((s) =>
+      KimiAgent.CANDIDATE_SPELLS.includes(s.id),
     );
 
-    let result = scored.map((x) => x.spell);
-    // Force at least one heal into the pool if available.
-    if (heal && !result.some((s) => s.id === heal.id)) {
-      result = [heal, ...result];
+    if (candidates.length === 0) {
+      this.preferredElements = available.slice(0, 5).map((s) => KimiAgent.elementId(s.element));
+      return available.slice(0, 5);
     }
 
-    if (result.length === 0) {
-      result = available.slice(0, 5);
+    // Score each candidate: big bonus if its element is generated by our team.
+    const scored = candidates.map((s) => {
+      const el = KimiAgent.elementId(s.element);
+      const generated = this.generatedElements.has(el) ? 1 : 0;
+      const convertible = this.generatedElements.has(KimiAgent.oppositeElement(el)) ? 0.5 : 0;
+      let score = 0;
+      if (s.id === 'vulcan-cataclysm') score += 8; // unique free nuke
+      if (generated) score += 6;
+      if (convertible) score += 2;
+      if (s.maxTargets >= 2) score += 3;
+      if (s.id === 'healing-light') score += 5; // reliable team heal
+      // Prefer costs we can realistically pay; very expensive off-element spells lose points.
+      if (s.stackCost <= 8) score += 2;
+      else if (s.stackCost <= 12) score += 1;
+      else score -= 2;
+      return { spell: s, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    // Force a heal if we picked one.
+    const heal = candidates.find((s) => s.id === 'healing-light');
+    let result = scored.map((x) => x.spell);
+    if (heal && !result.some((s) => s.id === 'healing-light')) {
+      result = [heal, ...result.filter((s) => s.id !== 'healing-light')];
     }
+
+    // Cap at the top 5 spells; the server truncates anyway, but keep it tidy.
+    result = result.slice(0, 5);
 
     this.preferredElements = result.map((s) => KimiAgent.elementId(s.element));
     return result;
@@ -194,6 +200,16 @@ export default class KimiAgent extends BriineAgent {
 
     const heal = this.tryHeal(status);
     if (heal) return heal;
+
+    // Spend surplus stack on a useful offensive spell before it caps or before
+    // we waste actions on weak attacks.
+    const big = this.tryOffensiveSpell(status);
+    if (big) return big;
+
+    // Defend when it is better than a weak attack, then fall back to attack.
+    if (this.shouldDefend(status)) {
+      return this.doDefend(status);
+    }
 
     const attack = this.tryAttack(status);
     if (attack) return attack;
@@ -213,18 +229,16 @@ export default class KimiAgent extends BriineAgent {
     );
     if (options.length === 0) return null;
 
-    // Prefer: (1) actually kills the target, (2) cheap, (3) multi-target, (4) high cost.
     const scored = options
       .filter((o) => this.canAffordSpell(o.spell, status.stack))
       .map((o) => {
-        // Estimate spell damage from stack cost as a rough proxy.
-        const dmg = o.spell.stackCost * 80;
+        const dmg = this.estimateSpellDamage(o.spell, status);
         const kills = target.hp <= dmg * 1.1;
         const multi = o.spell.maxTargets > 1 ? 1 : 0;
         const cost = o.spell.stackCost;
         return {
           option: o,
-          score: (kills ? 1000 : 0) + multi * 10 - cost * 0.1,
+          score: (kills ? 1000 : 0) + multi * 8 - cost * 0.2,
         };
       })
       .sort((a, b) => b.score - a.score);
@@ -232,19 +246,60 @@ export default class KimiAgent extends BriineAgent {
     const best = scored[0]?.option;
     if (!best) return null;
 
-    // Only cast expensive non-killing spells when they clearly swing the board.
-    if (best.spell.stackCost > 10) {
-      const lowHpAllies = status.alliesByLowestHp?.filter((a) => a.hp <= 40)
-        .length ?? 0;
-      const weAreAhead = lowHpAllies === 0;
-      if (!weAreAhead) return null;
+    // Only cast expensive non-killing spells when we are not in danger.
+    if (best.spell.stackCost > 10 && !this.weAreAhead(status)) {
+      return null;
     }
 
     return {
       action: best.spell,
       source: best.source,
-      target:
-        best.spell.maxTargets > 1 ? status.livingEnemies : target,
+      target: best.spell.maxTargets > 1 ? status.livingEnemies : target,
+    };
+  }
+
+  private tryOffensiveSpell(status: MatchStatus): Action | null {
+    const options = (status.offensiveSpellOptions ?? []).filter(
+      (o) => o.source.canAct && o.spell.available,
+    );
+    if (options.length === 0) return null;
+
+    const total = KimiAgent.totalStack(status.stack);
+    // Only look for a non-killing spend when we have meaningful surplus.
+    if (total < 18) return null;
+
+    const target =
+      status.vulnerableEnemies?.[0] ??
+      status.lowestHpEnemy ??
+      status.livingEnemies[0];
+    if (!target) return null;
+
+    const scored = options
+      .filter((o) => this.canAffordSpell(o.spell, status.stack))
+      .filter((o) => o.spell.stackCost >= 8)
+      .map((o) => {
+        const dmg = this.estimateSpellDamage(o.spell, status);
+        const kills = target.hp <= dmg * 1.1;
+        const multi = o.spell.maxTargets > 1 ? 1 : 0;
+        const el = KimiAgent.elementId(o.spell.element);
+        const matches = this.generatedElements.has(el) ? 1 : 0;
+        return {
+          option: o,
+          score: (kills ? 500 : 0) + multi * 5 + matches * 3 - o.spell.stackCost * 0.15,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    const best = scored[0]?.option;
+    if (!best) return null;
+    // Do not spend expensive spells when behind or when the spell is off-element
+    // and we have no surplus to spare.
+    if (best.spell.stackCost > 12 && !this.weAreAhead(status)) return null;
+
+    return {
+      action: best.spell,
+      source: best.source,
+      target: best.spell.maxTargets > 1 ? status.livingEnemies : target,
     };
   }
 
@@ -258,7 +313,6 @@ export default class KimiAgent extends BriineAgent {
     const neediest = status.alliesByLowestHp?.find((a) => a.hp <= threshold && a.hp > 0);
     if (!neediest) return null;
 
-    // Prefer multi-target heals when multiple allies are hurt, otherwise cheapest.
     options.sort((a, b) => {
       const hurt = status.alliesByLowestHp?.filter((a) => a.hp <= threshold).length ?? 0;
       const aMulti = a.spell.maxTargets > 1 ? 1 : 0;
@@ -273,8 +327,7 @@ export default class KimiAgent extends BriineAgent {
     return {
       action: best.spell,
       source: best.source,
-      target:
-        best.spell.maxTargets > 1 ? status.livingAllies : neediest,
+      target: best.spell.maxTargets > 1 ? status.livingAllies : neediest,
     };
   }
 
@@ -288,14 +341,19 @@ export default class KimiAgent extends BriineAgent {
     const options = (status.attackOptions ?? []).filter((o) => o.source.canAct);
     if (options.length === 0) return null;
 
-    // Skip attacking if our best option is very weak and defending preserves stamina.
     const strongest = this.pickStrongestAttack(options);
     if (!strongest) return null;
 
-    // Prefer an attack that matches a needed element and is reasonably strong.
     const preferred = this.findPreferredAttack(options, strongest.attack);
     if (preferred) {
       return { action: preferred.attack, source: preferred.source, target };
+    }
+
+    // If the strongest attack is weak and we are ahead or low on stamina, defend
+    // instead of burning an action on a holi swipe. We already passed shouldDefend,
+    // so this is the remaining fallback.
+    if (strongest.source.stamina < 20 && KimiAgent.attackElement(strongest.attack) === 'light') {
+      return null;
     }
 
     return { action: strongest.attack, source: strongest.source, target };
@@ -304,7 +362,6 @@ export default class KimiAgent extends BriineAgent {
   private pickStrongestAttack(
     options: Array<{ source: Ally; attack: Attack }>,
   ): { source: Ally; attack: Attack } | null {
-    // Use source stamina as the attack power proxy (higher stamina = harder hit).
     let best: { source: Ally; attack: Attack } | null = null;
     let bestPower = -1;
     for (const o of options) {
@@ -328,8 +385,7 @@ export default class KimiAgent extends BriineAgent {
         .sort((a, b) => b.source.stamina - a.source.stamina);
       if (candidates.length > 0) {
         const chosen = candidates[0];
-        // Only prefer this element if the attack is not dramatically weaker.
-        if (chosen.source.stamina >= options[0].source.stamina * 0.6 || element === fallbackElement) {
+        if (chosen.source.stamina >= options[0].source.stamina * 0.5 || element === fallbackElement) {
           return chosen;
         }
       }
@@ -338,28 +394,46 @@ export default class KimiAgent extends BriineAgent {
   }
 
   private shouldDefend(status: MatchStatus): boolean {
-    // Defend when no living ally is under heavy pressure but we lack a strong
-    // spell/attack, or when our frontline is low and we want to cut incoming dmg.
-    const frontliner = status.livingAllies[0];
-    const frontlineHurt = frontliner ? frontliner.hp <= 35 : false;
-    const anyHurt = (status.alliesByLowestHp?.[0]?.hp ?? 100) <= 25;
-    return frontlineHurt || anyHurt;
+    // Defend when we are ahead and the best available attack is weak, saving
+    // stamina for stronger turns.
+    const options = (status.attackOptions ?? []).filter((o) => o.source.canAct);
+    const strongest = options.sort((a, b) => b.source.stamina - a.source.stamina)[0];
+    const weakAttackAvailable =
+      !!strongest &&
+      strongest.source.stamina < 25 &&
+      KimiAgent.attackElement(strongest.attack) === 'light';
+
+    if (status.hasHpLead && status.hasActionEconomyLead && weakAttackAvailable) {
+      return true;
+    }
+
+    // Defend a low-HP ally that is not already defended.
+    const lowAlly = status.undefendedAllies?.find((a) => a.hp <= 35 && a.hp > 0);
+    if (lowAlly) return true;
+
+    // Defend if any ally is critically low regardless of lead.
+    const criticalAlly = status.alliesByLowestHp?.find((a) => a.hp <= 25 && a.hp > 0);
+    if (criticalAlly) return true;
+
+    return false;
   }
 
   private doDefend(status: MatchStatus): Action {
     const source =
+      status.undefendedAllies?.find((a) => a.canAct) ??
       status.livingAllies.find((a) => a.canAct) ??
-      status.undefendedAllies?.[0] ??
-      status.livingAllies[0] ??
       status.sources[0];
     return { action: 'defend', source, target: source };
   }
 
+  private weAreAhead(status: MatchStatus): boolean {
+    const lowHpAllies = status.alliesByLowestHp?.filter((a) => a.hp <= 40).length ?? 0;
+    return lowHpAllies === 0 && status.hasHpLead;
+  }
+
   private canAffordSpell(spell: AllySpell, stack: Stack): boolean {
-    // Spells with stackCost 0 (some unique spells) are always affordable.
     if (spell.stackCost <= 0) return true;
 
-    // If the spell has a specific element, check that color first.
     const spellElement =
       typeof spell.element === 'string'
         ? spell.element
@@ -367,9 +441,29 @@ export default class KimiAgent extends BriineAgent {
     if (spellElement && spellElement in stack) {
       const elementAmount = stack[spellElement as keyof Stack] ?? 0;
       if (elementAmount >= spell.stackCost) return true;
-      // Some spells may consume from a converted/shared pool; keep total as fallback.
     }
 
     return KimiAgent.totalStack(stack) >= spell.stackCost;
+  }
+
+  private estimateSpellDamage(spell: AllySpell, status: MatchStatus): number {
+    // Damage scales with stack cost and number of targets; long matches also
+    // scale via enrage, but that is symmetric so ignore it here.
+    const base = spell.stackCost * 75;
+    return spell.maxTargets > 1 ? base * (1 + spell.maxTargets * 0.25) : base;
+  }
+
+  private static oppositeElement(element: string): string {
+    const opposites: Record<string, string> = {
+      red: 'blue',
+      blue: 'red',
+      green: 'yellow',
+      yellow: 'green',
+      light: 'dark',
+      dark: 'light',
+      purple: 'orange',
+      orange: 'purple',
+    };
+    return opposites[element] ?? element;
   }
 }
